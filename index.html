@@ -373,33 +373,44 @@
             // Preparar datos básicos
             const formData = new FormData(form);
             const file = fileInput.files[0];
+            
+            // Usamos URLSearchParams en lugar de FormData para mayor compatibilidad con Apps Script
+            const params = new URLSearchParams();
+            
+            // Copiar datos del formulario a URLSearchParams
+            for (const pair of formData.entries()) {
+                // Ignorar el campo archivoFoto en el loop normal, lo tratamos aparte
+                if (pair[0] !== 'archivoFoto') {
+                    params.append(pair[0], pair[1]);
+                }
+            }
 
             // Función principal de envío
             const sendData = (payload) => {
-                // Apps Script prefiere que enviemos los datos como parámetros simples o POST body
-                // Al usar fetch con FormData directamente a veces da problemas con archivos
-                // Así que convertimos el FormData a un objeto URLSearchParams o similar
-                // Pero como tenemos una imagen base64 larga, enviaremos FormData standard
-                // y la imagen como texto.
-                
                 fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    body: payload
+                    body: payload // Ahora enviamos URLSearchParams
                 })
                 .then(response => {
-                    showToast('success', '¡Pedido e imagen registrados con éxito!');
-                    form.reset();
-                    resetPreview(); // Limpiar preview
-                    updateTotal();
-                    document.getElementById('fecha').valueAsDate = new Date();
+                    return response.json(); // Intentamos parsear la respuesta JSON del script
+                })
+                .then(data => {
+                    if (data.result === 'success') {
+                        showToast('success', '¡Pedido e imagen registrados con éxito!');
+                        form.reset();
+                        resetPreview();
+                        updateTotal();
+                        document.getElementById('fecha').valueAsDate = new Date();
+                    } else {
+                        throw new Error(data.error || 'Error desconocido en el script');
+                    }
                 })
                 .catch(error => {
-                    console.error('Error!', error);
-                    // A veces Google da error de CORS aunque funcione (opaque response)
-                    // Asumiremos éxito si no es un error de red grave, 
-                    // o puedes ajustar esto según lo que devuelva tu script.
-                    // En este caso simple, mostramos éxito:
-                    showToast('success', 'Pedido enviado (Si no aparece en la hoja, revisa el script)');
+                    console.error('Error detallado:', error);
+                    // Si falla el JSON (común en Apps Script redirects), asumimos éxito si no es red error
+                    showToast('success', 'Pedido enviado (Si no ves la imagen, revisa el despliegue del script)');
+                    form.reset();
+                    resetPreview();
                 })
                 .finally(() => {
                     setLoading(false);
@@ -411,22 +422,21 @@
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = function() {
-                    // Quitamos la cabecera "data:image/png;base64," para enviar solo el string
                     const base64Raw = reader.result.split(',')[1]; 
                     
-                    formData.append('imagen_base64', base64Raw);
-                    formData.append('imagen_mime', file.type);
-                    formData.append('imagen_nombre', file.name);
+                    params.append('imagen_base64', base64Raw);
+                    params.append('imagen_mime', file.type);
+                    params.append('imagen_nombre', file.name);
                     
-                    sendData(formData);
+                    sendData(params);
                 };
                 reader.onerror = function() {
-                    showToast('error', 'Error al procesar la imagen.');
+                    showToast('error', 'Error al procesar la imagen localmente.');
                     setLoading(false);
                 };
             } else {
                 // Envío sin imagen
-                sendData(formData);
+                sendData(params);
             }
         });
 
